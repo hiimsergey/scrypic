@@ -1,0 +1,6 @@
+env/
+main.build/
+main.dist/
+
+# TODO
+sheet.py
