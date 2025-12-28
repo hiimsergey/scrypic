@@ -197,3 +197,4 @@ Stdin: Deck in Arena format""")
 # --bonus <query>: if both queries combined dont 404, take them, otherwise just query
 # handle dfc cards
 # support for order:released to automatically resolve ambiguities
+# README.md
