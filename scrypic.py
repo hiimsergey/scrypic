@@ -3,14 +3,14 @@ import re
 import sys
 import requests
 from pathlib import Path
-from scrython.cards import Object, Search
+from scrython.cards import ById, Named, Object, Search
 
 
 TEXT_HELP = """\x1b[36mscrypic\x1b[39m - fetch artworks for your MtG decks from Scryfall
 
 To run this script on deck files, use one of either:
-  \x1b[32mscrypic "..." < deck.txt
-  cat deck.txt | scrypic "..."\x1b[39m
+  \x1b[32mscrypic output/ "..." < deck.txt
+  cat deck.txt | scrypic output/ "..."\x1b[39m
 """
 TEXT_INTERACTIVE = """Running in interactive mode instead...
 
@@ -22,9 +22,12 @@ Type Ctrl+D to stop
 """
 
 
-def die(msg: str):
-    print(f"\x1b[31mError: {msg}\x1b[39m", file=sys.stderr)
-    sys.exit(1)
+failed: list[str] = list()
+token_failed: list[str] = list()
+
+
+def printerr(msg: str):
+    print(f"\x1b[31m{msg}\x1b[39m", file=sys.stderr)
 
 
 def parse_mtga_deck() -> list[str]:
@@ -43,19 +46,40 @@ def parse_mtga_deck() -> list[str]:
     return sorted(card_names)
 
 
-def all_printings(card_name: str, query: str) -> Search:
+def all_printings(card_name: str, query: str) -> Search|None:
     card_name = card_name.replace('"', '\\"') # TODO REMOVE
     query = query or ""
 
     try:
-        result = Search(
+        return Search(
             q=f'!"{card_name}" {query}',
             unique="prints",
             order="released"
         )
-        return result
-    except:
-        die(f"No results found for '{card_name}'!")
+    except Exception:
+        printerr("    No results found!")
+        failed.append(card_name)
+        return None
+
+
+def all_tokens_with_printings(card_name: str) -> list[Search]|None:
+    card = Named(exact=card_name)
+    if not card.all_parts:
+        return None
+
+    result: list[Search] = list()
+    for card_part in card.all_parts:
+        if card_part.component != "token":
+            continue
+        token = ById(id=card_part.id)
+        try:
+            result.append(Search(q=f"oracleid:{token.oracle_id}"))
+        except:
+            printerr(f"    Token: No results found for '{token.name}'!")
+            token_failed.append(token.name)
+            continue
+
+    return result
 
 
 def download_image(card: Object, outdir: str):
@@ -66,7 +90,7 @@ def download_image(card: Object, outdir: str):
 
     # TODO
     # TODO dfc
-    url = card.image_uris[IMAGE_TYPE]
+    url = card.image_uris["png"]
     if not url:
         return
 
@@ -74,7 +98,7 @@ def download_image(card: Object, outdir: str):
         .replace(" ", "_")
         .replace("'", "")
         .replace(",", ""))
-    path = outdir / f"{name}.{IMAGE_TYPE}"
+    path = outdir / f"{name}.png"
 
     # TODO
     if path.exists():
@@ -84,7 +108,6 @@ def download_image(card: Object, outdir: str):
     r.raise_for_status()
 
     path.write_bytes(r.content)
-    print(f"• {path.name}")
 
 
 def main(outdir: str, query: str|None):
@@ -97,26 +120,59 @@ def main(outdir: str, query: str|None):
 
     cards: set[str] = parse_mtga_deck()
 
+    print()
     for card in cards:
         print(card)
         carddir = outpath / card
         carddir.mkdir(exist_ok=True)
 
         printings = all_printings(card, query)
-        seen = set()
+        if not printings:
+            continue
 
+        # TODO make it opt-in
+        all_tokens = all_tokens_with_printings(card)
+        if all_tokens:
+            for token_printings in all_tokens:
+                seen: set[str] = set()
+                for printing in token_printings.iter_all():
+                    id = printing.card_id
+                    if id in seen:
+                        continue
+
+                    seen.add(id)
+                    download_image(printing, carddir)
+                    print(f"    Token: {printing.name}")
+
+        seen: set[str] = set()
         for printing in printings.iter_all():
-            cid = printing.card_id
-            if cid in seen:
+            id = printing.card_id
+            if id in seen:
                 continue
 
-            seen.add(cid)
+            seen.add(id)
             download_image(printing, carddir)
+            print(f"    {printing.name}")
+
+    stat = 0
+    if len(failed) > 0:
+        printerr("Failed to download the following cards:")
+        for card in failed:
+            printerr(f"    {card}")
+        stat = 1
+    if len(token_failed) > 0:
+        printerr("Failed to download the following tokens:")
+        for token in token_failed:
+            printerr(f"    {token}")
+        stat = 1
+
+    sys.exit(stat)
 
 
 if __name__ == "__main__":
     outdir: str|None = None
     query: str|None = None
+
     match len(sys.argv):
         case 2:
             outdir = sys.argv[1]
@@ -132,8 +188,12 @@ Stdin: Deck in Arena format""")
     try:
         main(outdir, query)
     except KeyboardInterrupt:
-        die("Interrupted.")
+        printerr("Interrupted.")
+        sys.exit(130)
 
 # TODO
+# DEBUG token support
+# --tokens: include its tokens
+# --bonus <query>: if both queries combined dont 404, take them, otherwise just query
 # handle dfc cards
 # support for order:released to automatically resolve ambiguities
