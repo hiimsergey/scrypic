@@ -19,7 +19,7 @@ Pass MtG cards in Arena format line by line like this:
 \x1b[33m1 Lightning Bolt
 1 Llanowar Elves
 1 Opt\x1b[39m
-Type Ctrl+D to stop
+Type Ctrl+D to fetch them
 """
 
 
@@ -43,7 +43,7 @@ def printerr(msg: str):
 
 def safe_search(query: str) -> Search|None:
     try:
-        return Search(q=query, unique="prints")
+        return Search(q=query)
     except Exception:
         return None
 
@@ -231,10 +231,5 @@ if __name__ == "__main__":
         sys.exit(130)
 
 # TODO
-# DEBUG token support
-# --tokens: include its tokens
-# --bonus <query>: if both queries combined dont 404, take them, otherwise just query
 # handle dfc cards
-# support for order:released to automatically resolve ambiguities
 # README.md
-# proper argparse help message
